@@ -1,0 +1,40 @@
+# Keeps Casks/convert.rb on the latest Convert release: checks once a day (and on demand),
+# and when there's a newer release, points the cask at its Convert.zip with the new checksum.
+name: Bump Convert
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Update the cask if there's a newer release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo newtonstudios/convert --json tagName --jq .tagName)"
+          latest="${tag#v}"
+          current="$(sed -n 's/^  version "\(.*\)"$/\1/p' Casks/convert.rb)"
+          if [[ ! "$latest" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "Unexpected tag: $tag"; exit 1
+          fi
+          if [[ "$latest" == "$current" ]]; then
+            echo "Already on $current"; exit 0
+          fi
+          gh release download "$tag" --repo newtonstudios/convert --pattern Convert.zip --dir "$RUNNER_TEMP"
+          sha="$(sha256sum "$RUNNER_TEMP/Convert.zip" | cut -d' ' -f1)"
+          sed -i -e "s/^  version \".*\"$/  version \"$latest\"/" \
+                 -e "s/^  sha256 \".*\"$/  sha256 \"$sha\"/" Casks/convert.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "convert $latest"
+          git push
